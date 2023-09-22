@@ -46,7 +46,9 @@ char *todos_to_string() {
     if (todos[i].todo == NULL) {
       continue;
     }
-    strcat(str, todo_to_string(&todos[i]));
+    char *temp = todo_to_string(&todos[i]);
+    strcat(str, temp);
+    free(temp);
   }
   return str;
 }
@@ -65,7 +67,7 @@ void add_todo(const char *todo) {
 void delete_todo(int id) {
   for (int i = 0; i < todos_len; i++) {
     if (todos[i].id == id) {
-      todos[i].todo = NULL;
+      todos[i] = (Todo){0};
       return;
     }
   }
@@ -91,9 +93,11 @@ void handle_get(int *client_sock, char *buf) {
   if (strncmp(url, "all", 2) == 0) {
     char *msg = malloc(128 * 1024);
     memset(msg, '\0', 128 * 1024);
-    sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s",
-            todos_to_string());
+    char *temp = todos_to_string();
+    sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s", temp);
     write(*client_sock, msg, strlen(msg));
+    free(temp);
+    free(msg);
     return;
   }
   FILE *fp = fopen("index.html", "r");
@@ -149,10 +153,11 @@ int main(void) {
       add_todo(body);
       char *msg = malloc(512 * 1024);
       memset(msg, '\0', 512 * 1024);
-      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s",
-              todos_to_string());
+      char *temp = todos_to_string();
+      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s", temp);
       write(client_sock, msg, strlen(msg));
       free(msg);
+      free(temp);
     }
     if (strncmp(buf, "PUT", 3) == 0) {
       printf("PUT\n");
@@ -166,10 +171,11 @@ int main(void) {
       toggle_complete_todo(id);
       char *msg = malloc(512 * 1024);
       memset(msg, '\0', 512 * 1024);
-      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s",
-              todos_to_string());
+      char *todos = todos_to_string();
+      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s", todos);
       write(client_sock, msg, strlen(msg));
       free(msg);
+      free(todos);
     }
     if (strncmp(buf, "DELETE", 6) == 0) {
       printf("DELETE\n");
@@ -183,10 +189,11 @@ int main(void) {
       delete_todo(id);
       char *msg = malloc(512 * 1024);
       memset(msg, '\0', 512 * 1024);
-      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s",
-              todos_to_string());
+      char *todos = todos_to_string();
+      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s", todos);
       write(client_sock, msg, strlen(msg));
       free(msg);
+      free(todos);
     }
     free(buf);
     close(client_sock);

@@ -1,3 +1,3 @@
 #!/bin/bash
 
-clang -Wall -Wextra -o todo todo.c && ./todo
+clang -Wall -Wextra -g -ggdb -o todo todo.c && ./todo
