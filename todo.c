@@ -1,4 +1,5 @@
 #include <netinet/in.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,45 +16,68 @@
   } while (0)
 
 typedef struct {
-  int created_at;
+  int id;
   char *todo;
+  bool completed;
 } Todo;
 
-static const TODO_SIZE = 100;
+#define TODO_SIZE 100
+
 static Todo todos[TODO_SIZE];
 static int todos_len = 0;
 
 char *todo_to_string(Todo *t) {
   char *str = malloc(1000);
   memset(str, '\0', 1000);
-  sprintf(str, "{\"created_at\": %d, \"todo\": \"%s\"}", t->created_at,
-          t->todo);
+  sprintf(str, " \
+      <div style=\"display: flex; width: 100%%; align-items: center; gap: 5px\"> \
+        <input type=\"checkbox\" %s style=\"padding: 10px; height: 20px; width: 20px;\" hx-trigger=\"click\" hx-put=\"/%d\" hx-target=\"#items\" > \
+        <button style=\"display: flex; width: 20px; height: 20px; align-items: center; justify-content: center;\" hx-trigger=\"click\" hx-delete=\"/%d\" hx-target=\"#items\">x</button> \
+        <p style=\"padding: 10px; flex-grow: 1; margin: 0px; border: 1px solid black;\" type=\"text\">%s</p> \
+      </div>",
+          t->completed ? "checked" : "", t->id, t->id, t->todo);
   return str;
 }
 
 char *todos_to_string() {
   char *str = malloc(10000);
   memset(str, '\0', 10000);
-  strcat(str, "[");
   for (int i = 0; i < todos_len; i++) {
-    strcat(str, todo_to_string(&todos[i]));
-    if (i != todos_len - 1) {
-      strcat(str, ",");
+    if (todos[i].todo == NULL) {
+      continue;
     }
+    strcat(str, todo_to_string(&todos[i]));
   }
-  strcat(str, "]");
-  printf("todos_to_string: %s\n", str);
   return str;
 }
 
 void add_todo(const char *todo) {
   todos_len = todos_len % TODO_SIZE;
   todos[todos_len] = (Todo){0};
-  todos[todos_len].created_at = time(NULL);
+  todos[todos_len].id = time(NULL);
+  todos[todos_len].completed = false;
   todos[todos_len].todo = malloc(strlen(todo));
   memset(todos[todos_len].todo, '\0', strlen(todo));
   strcpy(todos[todos_len].todo, todo);
   todos_len++;
+}
+
+void delete_todo(int id) {
+  for (int i = 0; i < todos_len; i++) {
+    if (todos[i].id == id) {
+      todos[i].todo = NULL;
+      return;
+    }
+  }
+}
+
+void toggle_complete_todo(int id) {
+  for (int i = 0; i < todos_len; i++) {
+    if (todos[i].id == id) {
+      todos[i].completed = !todos[i].completed;
+      return;
+    }
+  }
 }
 
 typedef struct {
@@ -61,7 +85,30 @@ typedef struct {
   char *value;
 } Header;
 
-void handle_request(char *request, int *client_sock) {}
+void handle_get(int *client_sock, char *buf) {
+  char *url = strstr(buf, "/");
+  url++;
+  if (strncmp(url, "all", 2) == 0) {
+    char *msg = malloc(128 * 1024);
+    memset(msg, '\0', 128 * 1024);
+    sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s",
+            todos_to_string());
+    write(*client_sock, msg, strlen(msg));
+    return;
+  }
+  FILE *fp = fopen("index.html", "r");
+  char *msg = malloc(128 * 1024);
+  memset(msg, '\0', 128 * 1024);
+  strcat(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n");
+  char *line = NULL;
+  size_t len = 0;
+  while (getline(&line, &len, fp) != -1) {
+    strcat(msg, line);
+  }
+  fclose(fp);
+  write(*client_sock, msg, strlen(msg));
+  free(msg);
+}
 
 int main(void) {
   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -94,35 +141,56 @@ int main(void) {
       handle_error("read", client_sock);
     }
     if (strncmp(buf, "GET", 3) == 0) {
-      printf("GET\n");
-      char *msg = malloc(11000);
-      memset(msg, '\0', 11000);
-      strcat(msg, "HTTP/1.1 200 OK\nContent-Type: application/json\n\n");
-      strcat(msg, todos_to_string());
-      printf("msg to be sent: %s", msg);
-      write(client_sock, msg, strlen(msg));
-      free(msg);
+      handle_get(&client_sock, buf);
     }
     if (strncmp(buf, "POST", 4) == 0) {
       char *body = strstr(buf, "\r\n\r\n");
-      body += 4;
+      body += 9;
       add_todo(body);
-      printf("POST body: %s\n", buf);
-      char *msg = "HTTP/1.1 200 OK\nContent-Type: application/json\n\nPOST";
+      char *msg = malloc(512 * 1024);
+      memset(msg, '\0', 512 * 1024);
+      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s",
+              todos_to_string());
       write(client_sock, msg, strlen(msg));
+      free(msg);
     }
     if (strncmp(buf, "PUT", 3) == 0) {
       printf("PUT\n");
-      char *msg = "HTTP/1.1 200 OK\nContent-Type: application/json\n\nPUT";
+      char *temp = strstr(buf, "/");
+      temp++;
+      int id = 0;
+      while (*temp != ' ') {
+        id = id * 10 + *temp - '0';
+        temp++;
+      }
+      toggle_complete_todo(id);
+      char *msg = malloc(512 * 1024);
+      memset(msg, '\0', 512 * 1024);
+      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s",
+              todos_to_string());
       write(client_sock, msg, strlen(msg));
+      free(msg);
     }
     if (strncmp(buf, "DELETE", 6) == 0) {
       printf("DELETE\n");
-      char *msg = "HTTP/1.1 200 OK\nContent-Type: application/json\n\nDELETE";
+      char *temp = strstr(buf, "/");
+      temp++;
+      int id = 0;
+      while (*temp != ' ') {
+        id = id * 10 + *temp - '0';
+        temp++;
+      }
+      delete_todo(id);
+      char *msg = malloc(512 * 1024);
+      memset(msg, '\0', 512 * 1024);
+      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s",
+              todos_to_string());
       write(client_sock, msg, strlen(msg));
+      free(msg);
     }
     free(buf);
     close(client_sock);
+    printf("Waiting for next connection...\n");
   }
   close(sockfd);
   return 0;

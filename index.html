@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <title>todo.c</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="css/style.css" rel="stylesheet" />
+  <script src="https://unpkg.com/htmx.org@1.9.5"
+    integrity="sha384-xcuj3WpfgjlKF+FXhSQFQ0ZNr39ln+hwjN3npfM9VBnUskLolQAcN80McRIVOPuO"
+    crossorigin="anonymous"></script>
+</head>
+
+<body hx-trigger="load" hx-target="#items" hx-get="/all">
+  <div style="
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+      ">
+    <h1 style="text-align: center">todo.c</h1>
+    <div id="items" style="
+          display: flex;
+          flex-direction: column;
+          padding: 10px;
+          width: 400px;
+          gap: 10px;
+          min-height: 500px;
+          max-height: 500px;
+          border: 1px solid black;
+          padding: 10px;
+          overflow-y: auto;
+        "></div>
+    <div style="
+            display: flex;
+            width: 100%;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+          ">
+      <input autofocus autocomplete="off" id="todo-input" style="padding: 10px; flex-grow: 1; border: 1px solid black"
+        type="text" name="todo" placeholder="What needs to be done?" hx-trigger="keyup[key=='Enter'] from:#todo-input"
+        hx-post="/" hx-target="#items" hx-ext="enc-plain, reset-input" />
+    </div>
+  </div>
+  <script>
+    htmx.defineExtension("enc-plain", {
+      encodeParameters: function (xhr, parameters, elt) {
+        xhr.setRequestHeader("Content-Type", "text/plain");
+        let returnStr = "";
+        for (let i in parameters) {
+          returnStr += `${i}=${parameters[i]}\n`;
+        }
+        return returnStr;
+      },
+    });
+    htmx.defineExtension("reset-input", {
+      onEvent: function (name, evt) {
+        if (name === "htmx:afterRequest") {
+          evt.target.value = "";
+        }
+      },
+    });
+  </script>
+</body>
+
+</html>
