@@ -1,4 +1,5 @@
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,12 +31,12 @@ char *todo_to_string(Todo *t) {
   char *str = malloc(1000);
   memset(str, '\0', 1000);
   sprintf(str, " \
-      <div style=\"display: flex; width: 100%%; align-items: center; gap: 5px\"> \
-        <input type=\"checkbox\" %s style=\"padding: 10px; height: 20px; width: 20px;\" hx-trigger=\"click\" hx-put=\"/%d\" hx-target=\"#items\" > \
-        <button style=\"display: flex; width: 20px; height: 20px; align-items: center; justify-content: center;\" hx-trigger=\"click\" hx-delete=\"/%d\" hx-target=\"#items\">x</button> \
+      <li style=\"display: flex; width: 100%%; align-items: center; gap: 5px\"> \
         <p style=\"padding: 10px; flex-grow: 1; margin: 0px; border: 1px solid black;\" type=\"text\">%s</p> \
-      </div>",
-          t->completed ? "checked" : "", t->id, t->id, t->todo);
+        <input type=\"checkbox\" %s style=\"padding: 10px; height: 20px; width: 20px; margin: 0px;\" hx-trigger=\"click\" hx-put=\"/%d\" hx-target=\"#items\" > \
+        <button style=\"display: flex; width: 20px; height: 20px; align-items: center; justify-content: center;\" hx-trigger=\"click\" hx-delete=\"/%d\" hx-target=\"#items\">x</button> \
+      </li>",
+          t->todo, t->completed ? "checked" : "", t->id, t->id);
   return str;
 }
 
@@ -82,11 +83,6 @@ void toggle_complete_todo(int id) {
   }
 }
 
-typedef struct {
-  char *key;
-  char *value;
-} Header;
-
 void handle_get(int *client_sock, char *buf) {
   char *url = strstr(buf, "/");
   url++;
@@ -114,6 +110,83 @@ void handle_get(int *client_sock, char *buf) {
   free(msg);
 }
 
+void handle_post(int *client_sock, char *buf) {
+  char *body = strstr(buf, "\r\n\r\n");
+  body += 9;
+  add_todo(body);
+  char *msg = malloc(512 * 1024);
+  memset(msg, '\0', 512 * 1024);
+  char *temp = todos_to_string();
+  sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s", temp);
+  write(*client_sock, msg, strlen(msg));
+  free(msg);
+  free(temp);
+}
+
+void handle_put(int *client_sock, char *buf) {
+  char *temp = strstr(buf, "/");
+  temp++;
+  int id = 0;
+  while (*temp != ' ') {
+    id = id * 10 + *temp - '0';
+    temp++;
+  }
+  toggle_complete_todo(id);
+  char *msg = malloc(512 * 1024);
+  memset(msg, '\0', 512 * 1024);
+  char *todos = todos_to_string();
+  sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s", todos);
+  write(*client_sock, msg, strlen(msg));
+  free(msg);
+  free(todos);
+}
+
+void handle_delete(int *client_sock, char *buf) {
+  char *temp = strstr(buf, "/");
+  temp++;
+  int id = 0;
+  while (*temp != ' ') {
+    id = id * 10 + *temp - '0';
+    temp++;
+  }
+  delete_todo(id);
+  char *msg = malloc(512 * 1024);
+  memset(msg, '\0', 512 * 1024);
+  char *todos = todos_to_string();
+  sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s", todos);
+  write(*client_sock, msg, strlen(msg));
+  free(msg);
+  free(todos);
+}
+
+void *handle_request(int *client_sock) {
+  char *buf = malloc(10000);
+  memset(buf, '\0', 10000);
+  if (read(*client_sock, buf, 10000) == -1) {
+    handle_error("read", *client_sock);
+  }
+  if (strncmp(buf, "GET", 3) == 0) {
+    printf("GET\n");
+    handle_get(&*client_sock, buf);
+  }
+  if (strncmp(buf, "POST", 4) == 0) {
+    printf("POST\n");
+    handle_post(client_sock, buf);
+  }
+  if (strncmp(buf, "PUT", 3) == 0) {
+    printf("PUT\n");
+    handle_put(client_sock, buf);
+  }
+  if (strncmp(buf, "DELETE", 6) == 0) {
+    printf("DELETE\n");
+    handle_delete(client_sock, buf);
+  }
+  free(buf);
+  close(*client_sock);
+  close(*client_sock);
+  return NULL;
+};
+
 int main(void) {
   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
   if (sockfd == -1) {
@@ -139,64 +212,15 @@ int main(void) {
       handle_error("accept", sockfd);
     };
     printf("Accepted connection\n");
-    char *buf = malloc(10000);
-    memset(buf, '\0', 10000);
-    if (read(client_sock, buf, 10000) == -1) {
-      handle_error("read", client_sock);
+    pthread_t thid;
+    void *ret = NULL;
+    int res = pthread_create(&thid, NULL, (void *)handle_request, &client_sock);
+    if (res != 0) {
+      handle_error("pthread_create", sockfd);
     }
-    if (strncmp(buf, "GET", 3) == 0) {
-      handle_get(&client_sock, buf);
+    if (pthread_join(thid, ret) != 0) {
+      handle_error("pthread_join", sockfd);
     }
-    if (strncmp(buf, "POST", 4) == 0) {
-      char *body = strstr(buf, "\r\n\r\n");
-      body += 9;
-      add_todo(body);
-      char *msg = malloc(512 * 1024);
-      memset(msg, '\0', 512 * 1024);
-      char *temp = todos_to_string();
-      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s", temp);
-      write(client_sock, msg, strlen(msg));
-      free(msg);
-      free(temp);
-    }
-    if (strncmp(buf, "PUT", 3) == 0) {
-      printf("PUT\n");
-      char *temp = strstr(buf, "/");
-      temp++;
-      int id = 0;
-      while (*temp != ' ') {
-        id = id * 10 + *temp - '0';
-        temp++;
-      }
-      toggle_complete_todo(id);
-      char *msg = malloc(512 * 1024);
-      memset(msg, '\0', 512 * 1024);
-      char *todos = todos_to_string();
-      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s", todos);
-      write(client_sock, msg, strlen(msg));
-      free(msg);
-      free(todos);
-    }
-    if (strncmp(buf, "DELETE", 6) == 0) {
-      printf("DELETE\n");
-      char *temp = strstr(buf, "/");
-      temp++;
-      int id = 0;
-      while (*temp != ' ') {
-        id = id * 10 + *temp - '0';
-        temp++;
-      }
-      delete_todo(id);
-      char *msg = malloc(512 * 1024);
-      memset(msg, '\0', 512 * 1024);
-      char *todos = todos_to_string();
-      sprintf(msg, "HTTP/1.1 200 OK\nContent-Type: text/html\n\n%s", todos);
-      write(client_sock, msg, strlen(msg));
-      free(msg);
-      free(todos);
-    }
-    free(buf);
-    close(client_sock);
     printf("Waiting for next connection...\n");
   }
   close(sockfd);
